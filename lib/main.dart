@@ -201,11 +201,11 @@ class _RandomImageScreenState extends State<RandomImageScreen>
                     Expanded(
                       child: Center(
                         child: Semantics(
-                          label: _errorMessage != null
-                              ? _errorMessage
-                              : _currentImageUrl != null
-                              ? 'Random image from Unsplash'
-                              : 'Image loading area',
+                          label:
+                              _errorMessage ??
+                              (_currentImageUrl != null
+                                  ? 'Random image from Unsplash'
+                                  : 'Image loading area'),
                           hint: _errorMessage == null && !_isLoading
                               ? 'Tap Another button to load new image'
                               : null,
