@@ -1,121 +1,358 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:palette_generator/palette_generator.dart';
 
 void main() {
   runApp(const MyApp());
 }
 
+/// Root widget that sets up theming and routing
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'Random Image Viewer',
+      debugShowCheckedModeBanner: false,
+      // Light theme with Material Design 3
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: .fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+        useMaterial3: true,
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      darkTheme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.blue,
+          brightness: Brightness.dark,
+        ),
+        useMaterial3: true,
+      ),
+      themeMode: ThemeMode.system,
+      home: const RandomImageScreen(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+/// Main screen that displays random images with adaptive background colors
+class RandomImageScreen extends StatefulWidget {
+  const RandomImageScreen({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<RandomImageScreen> createState() => _RandomImageScreenState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _RandomImageScreenState extends State<RandomImageScreen>
+    with SingleTickerProviderStateMixin {
+  // API endpoint for fetching random image URLs
+  static const String apiUrl =
+      'https://november7-730026606190.europe-west1.run.app/image';
 
-  void _incrementCounter() {
+  // State variables
+  String? _currentImageUrl;
+  bool _isLoading = false;
+  String? _errorMessage;
+  Color _backgroundColor = Colors.grey.shade200;
+
+  // Animation controllers for smooth fade-in effect
+  late AnimationController _fadeController;
+  late Animation<double> _fadeAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    // Set up fade animation for smooth image transitions
+    _fadeController = AnimationController(
+      duration: const Duration(milliseconds: 500),
+      vsync: this,
+    );
+    _fadeAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _fadeController, curve: Curves.easeIn));
+    // Fetch the first image on app start
+    _fetchRandomImage();
+  }
+
+  @override
+  void dispose() {
+    _fadeController.dispose();
+    super.dispose();
+  }
+
+  /// Fetches a random image URL from the API
+  Future<void> _fetchRandomImage() async {
     setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
+      _isLoading = true;
+      _errorMessage = null;
     });
+
+    try {
+      final response = await http
+          .get(Uri.parse(apiUrl))
+          .timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final imageUrl = data['url'] as String?;
+
+        if (imageUrl != null && imageUrl.isNotEmpty) {
+          setState(() {
+            _currentImageUrl = imageUrl;
+            _isLoading = false;
+          });
+          _fadeController.forward(from: 0.0);
+          _extractColors(imageUrl);
+        } else {
+          throw Exception('Invalid image URL received');
+        }
+      } else {
+        throw Exception('Failed to load image: ${response.statusCode}');
+      }
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Failed to load image. Please try again.';
+      });
+    }
+  }
+
+  /// Extracts dominant colors from the image to set adaptive background
+  Future<void> _extractColors(String imageUrl) async {
+    try {
+      final imageProvider = CachedNetworkImageProvider(imageUrl);
+      final paletteGenerator = await PaletteGenerator.fromImageProvider(
+        imageProvider,
+        maximumColorCount: 20,
+      );
+
+      if (mounted) {
+        setState(() {
+          _backgroundColor =
+              paletteGenerator.dominantColor?.color ??
+              paletteGenerator.vibrantColor?.color ??
+              paletteGenerator.mutedColor?.color ??
+              Colors.grey.shade200;
+        });
+      }
+    } catch (e) {
+      // If color extraction fails, keep the current background color
+      debugPrint('Color extraction failed: $e');
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
+    // Determine background color based on theme and image state
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    final defaultBgColor = isDarkMode
+        ? Colors.grey.shade900
+        : Colors.grey.shade200;
+    final displayBgColor = _currentImageUrl != null
+        ? _backgroundColor
+        : defaultBgColor;
+
     return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: .center,
-          children: [
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+      body: Semantics(
+        label: 'Random Image Viewer',
+        container: true,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 800),
+          curve: Curves.easeInOut,
+          color: displayBgColor,
+          child: SafeArea(
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    // Image Container
+                    Expanded(
+                      child: Center(
+                        child: Semantics(
+                          label: _currentImageUrl != null
+                              ? 'Random image from Unsplash'
+                              : 'Image loading area',
+                          hint: _isLoading
+                              ? 'Loading new image'
+                              : _errorMessage != null
+                              ? 'Failed to load image'
+                              : 'Tap Another button to load new image',
+                          image: _currentImageUrl != null && !_isLoading,
+                          child: AspectRatio(
+                            aspectRatio: 1.0,
+                            child: _buildImageWidget(context),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 32),
+                    // Another Button
+                    Semantics(
+                      button: true,
+                      enabled: !_isLoading,
+                      label: 'Another button',
+                      hint: _isLoading
+                          ? 'Loading new image, please wait'
+                          : 'Double tap to load a new random image',
+                      onTapHint: 'Load new image',
+                      child: ElevatedButton(
+                        onPressed: _isLoading ? null : _fetchRandomImage,
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 48,
+                            vertical: 16,
+                          ),
+                          textStyle: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          elevation: 4,
+                        ),
+                        child: _isLoading
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Text('Another'),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                  ],
+                ),
+              ),
             ),
-          ],
+          ),
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
+    );
+  }
+
+  /// Builds the main image widget with appropriate state (loading, error, or image)
+  Widget _buildImageWidget(BuildContext context) {
+    if (_errorMessage != null) {
+      return _buildErrorWidget();
+    }
+
+    if (_currentImageUrl == null || _isLoading) {
+      return _buildLoadingWidget();
+    }
+
+    return FadeTransition(
+      opacity: _fadeAnimation,
+      child: Semantics(
+        label: 'Random image displayed',
+        hint: 'Image from Unsplash',
+        image: true,
+        excludeSemantics: true,
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.3),
+                blurRadius: 20,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: CachedNetworkImage(
+              imageUrl: _currentImageUrl!,
+              fit: BoxFit.cover,
+              placeholder: (context, url) => _buildLoadingWidget(),
+              errorWidget: (context, url, error) => _buildErrorWidget(),
+              fadeInDuration: const Duration(milliseconds: 300),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Builds the loading state UI with spinner and accessibility support
+  Widget _buildLoadingWidget() {
+    return Semantics(
+      label: 'Loading image',
+      hint: 'Please wait while the image is being fetched',
+      liveRegion: true,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.grey.shade300,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Semantics(
+                label: 'Loading spinner',
+                child: CircularProgressIndicator(
+                  semanticsLabel: 'Loading image',
+                  color: Theme.of(context).primaryColor,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Semantics(
+                label: 'Loading status',
+                child: Text(
+                  'Loading...',
+                  style: TextStyle(color: Colors.grey.shade700, fontSize: 16),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Builds the error state UI with error message and accessibility support
+  Widget _buildErrorWidget() {
+    return Semantics(
+      label: 'Error occurred',
+      hint:
+          '${_errorMessage ?? "Failed to load image"}. Tap Another button to try again',
+      liveRegion: true,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.grey.shade300,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Semantics(
+                  label: 'Error icon',
+                  child: Icon(
+                    Icons.error_outline,
+                    size: 48,
+                    color: Colors.red.shade400,
+                    semanticLabel: 'Error loading image',
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Semantics(
+                  label: 'Error message',
+                  child: Text(
+                    _errorMessage ?? 'Failed to load image',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.grey.shade700, fontSize: 16),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
