@@ -95,9 +95,15 @@ class _RandomImageScreenState extends State<RandomImageScreen>
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        final imageUrl = data['url'] as String?;
+        var imageUrl = data['url'] as String?;
 
         if (imageUrl != null && imageUrl.isNotEmpty) {
+          // Optimize Unsplash images by adding size parameters
+          // This reduces image size from ~5MB to ~200KB
+          if (imageUrl.contains('unsplash.com')) {
+            imageUrl = '$imageUrl?w=1000&q=80';
+          }
+
           setState(() {
             _currentImageUrl = imageUrl;
             _isLoading = false;
@@ -269,6 +275,11 @@ class _RandomImageScreenState extends State<RandomImageScreen>
               placeholder: (context, url) => _buildLoadingWidget(),
               errorWidget: (context, url, error) => _buildErrorWidget(),
               fadeInDuration: const Duration(milliseconds: 300),
+              // Performance optimizations
+              maxHeightDiskCache: 1000,
+              maxWidthDiskCache: 1000,
+              memCacheHeight: 1000,
+              memCacheWidth: 1000,
             ),
           ),
         ),
