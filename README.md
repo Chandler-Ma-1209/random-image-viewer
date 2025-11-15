@@ -78,6 +78,12 @@ The app uses the following API endpoint:
 - Android Studio / Xcode for mobile development
 - A physical device or emulator
 
+### Test Device
+
+This app has been tested on:
+
+- **Samsung Galaxy S20 FE 5G** (Android) with TalkBack enabled
+
 ### Installation
 
 1. Clone the repository:
