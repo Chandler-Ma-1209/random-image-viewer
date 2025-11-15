@@ -25,7 +25,6 @@ This is a Flutter app that fetches and displays random images from Unsplash with
   <img src="screenshots/app_screenshot_1.png" alt="Random Image Viewer - Screenshot 1" width="250"/>
   <img src="screenshots/app_screenshot_2.png" alt="Random Image Viewer - Screenshot 2" width="250"/>
   <img src="screenshots/app_screenshot_3.png" alt="Random Image Viewer - Screenshot 3" width="250"/>
-  <img src="screenshots/app_screenshot_4.png" alt="Random Image Viewer - Screenshot 4" width="250"/>
 </div>
 
 _The app displays random images from Unsplash with adaptive background colors that match the image's dominant colors._
