@@ -30,6 +30,12 @@ This is a Flutter app that fetches and displays random images from Unsplash with
 
 _The app displays random images from Unsplash with adaptive background colors that match the image's dominant colors._
 
+## Demo Video
+
+See the app in action with full TalkBack accessibility demonstration:
+
+[📹 Screen Recording](demo/screen_recording.mp4)
+
 ## API
 
 The app uses the following API endpoint:
@@ -188,6 +194,9 @@ This project is created as part of Aurora Engineering Assessment.
 
 Jiahua Ma (Chandler-Ma-1209)
 
-## Demo Video
+## References
 
-[Video link or file will be added after recording]
+- **Demo Video**: [demo/screen_recording.mp4](demo/screen_recording.mp4)
+- **Screenshots**: Available in [screenshots/](screenshots/) folder
+- **API Endpoint**: https://november7-730026606190.europe-west1.run.app/image
+- **Repository**: https://github.com/Chandler-Ma-1209/random-image-viewer

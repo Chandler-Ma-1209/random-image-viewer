@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:http/http.dart' as http;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:palette_generator/palette_generator.dart';
@@ -54,6 +55,7 @@ class _RandomImageScreenState extends State<RandomImageScreen>
   bool _isLoading = false;
   String? _errorMessage;
   Color _backgroundColor = Colors.grey.shade200;
+  String? _lastAnnouncedUrl; // Track last announced URL to avoid duplicates
 
   // Animation controllers for smooth fade-in effect
   late AnimationController _fadeController;
@@ -86,7 +88,14 @@ class _RandomImageScreenState extends State<RandomImageScreen>
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _lastAnnouncedUrl = null; // Reset announcement tracking
     });
+
+    // Announce loading state to screen readers
+    SemanticsService.announce(
+      'Loading new image, please wait',
+      TextDirection.ltr,
+    );
 
     try {
       final response = await http
@@ -97,11 +106,21 @@ class _RandomImageScreenState extends State<RandomImageScreen>
         final data = json.decode(response.body);
         var imageUrl = data['url'] as String?;
 
+        // Debug: Print the received URL
+        debugPrint('📸 Received image URL: $imageUrl');
+        debugPrint('📋 Full response: ${response.body}');
+
         if (imageUrl != null && imageUrl.isNotEmpty) {
+          // Check if the URL contains "failed to load" text (edge case)
+          if (imageUrl.toLowerCase().contains('failed')) {
+            debugPrint('⚠️ Warning: URL contains "failed" text');
+          }
+
           // Optimize Unsplash images by adding size parameters
           // This reduces image size from ~5MB to ~200KB
           if (imageUrl.contains('unsplash.com')) {
             imageUrl = '$imageUrl?w=1000&q=80';
+            debugPrint('✅ Optimized Unsplash URL: $imageUrl');
           }
 
           setState(() {
@@ -109,7 +128,7 @@ class _RandomImageScreenState extends State<RandomImageScreen>
             _isLoading = false;
           });
           _fadeController.forward(from: 0.0);
-          _extractColors(imageUrl);
+          // Note: Color extraction moved to imageBuilder to avoid 404 timeouts
         } else {
           throw Exception('Invalid image URL received');
         }
@@ -119,8 +138,12 @@ class _RandomImageScreenState extends State<RandomImageScreen>
     } catch (e) {
       setState(() {
         _isLoading = false;
-        _errorMessage = 'Failed to load image. Please try again.';
+        _currentImageUrl = null; // Clear image URL on error
+        _errorMessage = 'Failed to load image. Please try again';
       });
+
+      // Note: Error announcement is handled by CachedNetworkImage's errorWidget
+      // to avoid duplicate announcements
     }
   }
 
@@ -178,15 +201,18 @@ class _RandomImageScreenState extends State<RandomImageScreen>
                     Expanded(
                       child: Center(
                         child: Semantics(
-                          label: _currentImageUrl != null
+                          label: _errorMessage != null
+                              ? _errorMessage
+                              : _currentImageUrl != null
                               ? 'Random image from Unsplash'
                               : 'Image loading area',
-                          hint: _isLoading
-                              ? 'Loading new image'
-                              : _errorMessage != null
-                              ? 'Failed to load image'
-                              : 'Tap Another button to load new image',
-                          image: _currentImageUrl != null && !_isLoading,
+                          hint: _errorMessage == null && !_isLoading
+                              ? 'Tap Another button to load new image'
+                              : null,
+                          image:
+                              _currentImageUrl != null &&
+                              !_isLoading &&
+                              _errorMessage == null,
                           child: AspectRatio(
                             aspectRatio: 1.0,
                             child: _buildImageWidget(context),
@@ -199,11 +225,8 @@ class _RandomImageScreenState extends State<RandomImageScreen>
                     Semantics(
                       button: true,
                       enabled: !_isLoading,
-                      label: 'Another button',
-                      hint: _isLoading
-                          ? 'Loading new image, please wait'
-                          : 'Double tap to load a new random image',
-                      onTapHint: 'Load new image',
+                      label: 'Another',
+                      hint: 'Double tap to load a new random image',
                       child: ElevatedButton(
                         onPressed: _isLoading ? null : _fetchRandomImage,
                         style: ElevatedButton.styleFrom(
@@ -273,7 +296,46 @@ class _RandomImageScreenState extends State<RandomImageScreen>
               imageUrl: _currentImageUrl!,
               fit: BoxFit.cover,
               placeholder: (context, url) => _buildLoadingWidget(),
-              errorWidget: (context, url, error) => _buildErrorWidget(),
+              imageBuilder: (context, imageProvider) {
+                // Image successfully loaded - extract colors and announce to screen reader
+                final imageUrl = _currentImageUrl!;
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  // Only announce if this is a new image (not already announced)
+                  if (_lastAnnouncedUrl != imageUrl) {
+                    _lastAnnouncedUrl = imageUrl;
+                    _extractColors(imageUrl);
+                    SemanticsService.announce(
+                      'New image loaded successfully',
+                      TextDirection.ltr,
+                    );
+                  }
+                });
+                return Image(image: imageProvider, fit: BoxFit.cover);
+              },
+              errorWidget: (context, url, error) {
+                // Log the error for debugging
+                debugPrint('❌ Image load error: $error');
+                debugPrint('❌ Failed URL: $url');
+
+                // Set error state when image fails to load
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) {
+                    setState(() {
+                      _isLoading = false; // Stop loading animation
+                      _errorMessage = 'Failed to load image. Please try again';
+                      _currentImageUrl = null;
+                    });
+
+                    // Manually announce error since we removed liveRegion
+                    SemanticsService.announce(
+                      'Failed to load image. Please try again',
+                      TextDirection.ltr,
+                    );
+                  }
+                });
+
+                return _buildErrorWidget();
+              },
               fadeInDuration: const Duration(milliseconds: 300),
               // Performance optimizations
               maxHeightDiskCache: 1000,
@@ -289,36 +351,28 @@ class _RandomImageScreenState extends State<RandomImageScreen>
 
   /// Builds the loading state UI with spinner and accessibility support
   Widget _buildLoadingWidget() {
-    return Semantics(
-      label: 'Loading image',
-      hint: 'Please wait while the image is being fetched',
-      liveRegion: true,
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.grey.shade300,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Semantics(
-                label: 'Loading spinner',
-                child: CircularProgressIndicator(
-                  semanticsLabel: 'Loading image',
-                  color: Theme.of(context).primaryColor,
-                ),
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.grey.shade300,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ExcludeSemantics(
+              child: CircularProgressIndicator(
+                color: Theme.of(context).primaryColor,
               ),
-              const SizedBox(height: 16),
-              Semantics(
-                label: 'Loading status',
-                child: Text(
-                  'Loading...',
-                  style: TextStyle(color: Colors.grey.shade700, fontSize: 16),
-                ),
+            ),
+            const SizedBox(height: 16),
+            ExcludeSemantics(
+              child: Text(
+                'Loading...',
+                style: TextStyle(color: Colors.grey.shade700, fontSize: 16),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -326,42 +380,33 @@ class _RandomImageScreenState extends State<RandomImageScreen>
 
   /// Builds the error state UI with error message and accessibility support
   Widget _buildErrorWidget() {
-    return Semantics(
-      label: 'Error occurred',
-      hint:
-          '${_errorMessage ?? "Failed to load image"}. Tap Another button to try again',
-      liveRegion: true,
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.grey.shade300,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Semantics(
-                  label: 'Error icon',
-                  child: Icon(
-                    Icons.error_outline,
-                    size: 48,
-                    color: Colors.red.shade400,
-                    semanticLabel: 'Error loading image',
-                  ),
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.grey.shade300,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ExcludeSemantics(
+                child: Icon(
+                  Icons.error_outline,
+                  size: 48,
+                  color: Colors.red.shade400,
                 ),
-                const SizedBox(height: 16),
-                Semantics(
-                  label: 'Error message',
-                  child: Text(
-                    _errorMessage ?? 'Failed to load image',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.grey.shade700, fontSize: 16),
-                  ),
+              ),
+              const SizedBox(height: 16),
+              ExcludeSemantics(
+                child: Text(
+                  _errorMessage ?? 'Failed to load image',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey.shade700, fontSize: 16),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
